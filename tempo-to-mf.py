@@ -3,21 +3,42 @@
 
 import sys
 
-if len(sys.argv) != 2 and len(sys.argv) != 3:
-    print("USAGE: tempo-to-mf <tempo.json> [component key file]")
-    sys.exit()
+if len(sys.argv) != 3 and len(sys.argv) != 4:
+    print("USAGE: tempo-to-mf <upverter.upv> <tempo.json> [component key file]")
+    sys.exit(1)
 
 import json
 
-tempo = json.load(open(sys.argv[1]))
+upv = json.load(open(sys.argv[1]))
+tempo = json.load(open(sys.argv[2]))
+
+# ----------------------------
+# PARSE UPVERTER FILE
+# ----------------------------
+# The only thing we currently care about (because we leverage the tempo format)
+# is the mechanical details layer offset
+board_offset = None
+for path in upv['paths']:
+    if path['layer'] == 'mechanical details':
+        # Find the top left point (it's usually the first one)
+        # this can be done by finding the miniumum (x - y)
+        # here's a bad algorithm:
+        top_left = sorted(path['points'], key=lambda p: p['x'] - p['y'])[0]
+        # Upverter's units are in nm, we convert to meters then to inches
+        board_offset = (top_left['x'] / 10.0**9 * 39.37, top_left['y']/ 10.0**9 * 39.37)
+        break
+print(board_offset)
+if not board_offset:
+    print("Couldn't find board offset from mechanical details layer")
+    sys.exit(1)
 
 # ----------------------------
 # GENERATE/READ KEY FILE
 # ----------------------------
 
 comp_keys = None
-if len(sys.argv) == 3:
-    comp_keys = json.load(open(sys.argv[2]))
+if len(sys.argv) == 4:
+    comp_keys = json.load(open(sys.argv[3]))
 else:
     print("You did not specify a key file, beginning generation...")
     print("You will be asked for the MPN for each component type in the file")
@@ -55,8 +76,8 @@ for placement in tempo["placements"]:
     cinfo = comp_keys[placement["ComponentId"]]
     lines.append([
         placement['DesignName'], # Designator
-        placement['BoardLocationX'] * 1000, #X-Loc
-        placement['BoardLocationY'] * 1000, #Y-Loc
+        (placement['BoardLocationX'] - board_offset[0]) * 1000, #X-Loc
+        (placement['BoardLocationY'] - board_offset[1]) * 1000, #Y-Loc
         placement['Rotation'], # Rotation
         placement['Layer'], # Side
         cinfo['Type'], # Type
